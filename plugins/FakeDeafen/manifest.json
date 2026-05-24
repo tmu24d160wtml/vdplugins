@@ -1,0 +1,14 @@
+{
+  "name": "Fake Deafen",
+  "description": "Fake self-deafen/self-mute voice state by intercepting Discord Gateway voice-state payloads.",
+  "authors": [
+    {
+      "name": "watermeloz",
+      "id": "394469439606882305"
+    }
+  ],
+  "main": "src/index.ts",
+  "vendetta": {
+    "icon": "ic_mic_muted_24px"
+  }
+}
