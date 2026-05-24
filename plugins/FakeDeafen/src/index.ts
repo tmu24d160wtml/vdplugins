@@ -1,15 +1,19 @@
 let originalSend: typeof WebSocket.prototype.send | null = null;
 let installed = false;
+let unregisterCommand: (() => void) | null = null;
 
 type FakeDeafenState = {
   installed: boolean;
+  enabled: boolean;
   originalSend: typeof WebSocket.prototype.send;
   activeWebSocket: WebSocket | null;
-  lastVoiceState: unknown;
+  lastVoiceState: any;
 };
 
 declare global {
   var __fakeDeafenVendetta: FakeDeafenState | undefined;
+  var bunny: any;
+  var vendetta: any;
 }
 
 function log(...args: unknown[]) {
@@ -34,6 +38,25 @@ function getWebSocketPrototype() {
   return WebSocketCtor.prototype;
 }
 
+function getEnabled() {
+  return globalThis.__fakeDeafenVendetta?.enabled ?? false;
+}
+
+function setEnabled(value: boolean) {
+  const state = globalThis.__fakeDeafenVendetta;
+
+  if (state) {
+    state.enabled = value;
+    log(`Realtime toggle: ${value ? "ON" : "OFF"}`);
+  }
+}
+
+function toggleEnabled() {
+  const next = !getEnabled();
+  setEnabled(next);
+  return next;
+}
+
 function patchWebSocket() {
   if (installed || globalThis.__fakeDeafenVendetta?.installed) {
     log("Already installed.");
@@ -51,6 +74,7 @@ function patchWebSocket() {
 
   const state: FakeDeafenState = {
     installed: true,
+    enabled: true,
     originalSend,
     activeWebSocket: null,
     lastVoiceState: null
@@ -58,7 +82,10 @@ function patchWebSocket() {
 
   globalThis.__fakeDeafenVendetta = state;
 
-  proto.send = function patchedSend(this: WebSocket, data: string | ArrayBufferLike | Blob | ArrayBufferView) {
+  proto.send = function patchedSend(
+    this: WebSocket,
+    data: string | ArrayBufferLike | Blob | ArrayBufferView
+  ) {
     try {
       if (typeof data === "string" && data.includes('"op":4')) {
         const payload = JSON.parse(data);
@@ -67,12 +94,16 @@ function patchWebSocket() {
           state.activeWebSocket = this;
           state.lastVoiceState = { ...payload.d };
 
-          payload.d.self_deaf = true;
-          payload.d.self_mute = true;
+          if (state.enabled) {
+            payload.d.self_deaf = true;
+            payload.d.self_mute = true;
 
-          data = JSON.stringify(payload);
+            data = JSON.stringify(payload);
 
-          log("Forced voice state: self_deaf=true, self_mute=true");
+            log("Forced voice state: self_deaf=true, self_mute=true");
+          } else {
+            log("Bypassed voice state because toggle is OFF.");
+          }
         }
       }
     } catch (e) {
@@ -104,7 +135,51 @@ function unpatchWebSocket() {
   log("Stopped and restored WebSocket.prototype.send.");
 }
 
+function tryRegisterCommand() {
+  const registerCommand =
+    globalThis.bunny?.api?.commands?.registerCommand ??
+    globalThis.vendetta?.commands?.registerCommand;
+
+  if (typeof registerCommand !== "function") {
+    error("registerCommand not found. Slash command /fd will not be available.");
+    return;
+  }
+
+  unregisterCommand = registerCommand({
+    name: "fd",
+    displayName: "fd",
+    description: "Toggle Fake Deafen ON/OFF",
+    displayDescription: "Toggle Fake Deafen ON/OFF",
+    options: [],
+
+    execute: () => {
+      const enabled = toggleEnabled();
+
+      return {
+        content: `Fake Deafen: ${enabled ? "ON" : "OFF"}`
+      };
+    }
+  });
+
+  log("Registered /fd command.");
+}
+
+function unregisterFdCommand() {
+  if (typeof unregisterCommand === "function") {
+    unregisterCommand();
+  }
+
+  unregisterCommand = null;
+}
+
 export default {
-  onLoad: patchWebSocket,
-  onUnload: unpatchWebSocket
+  onLoad() {
+    patchWebSocket();
+    tryRegisterCommand();
+  },
+
+  onUnload() {
+    unregisterFdCommand();
+    unpatchWebSocket();
+  }
 };
