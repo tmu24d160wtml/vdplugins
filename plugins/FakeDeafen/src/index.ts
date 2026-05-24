@@ -1,3 +1,5 @@
+import { showToast } from "@vendetta/ui/toasts";
+
 let originalSend: typeof WebSocket.prototype.send | null = null;
 let installed = false;
 let unregisterCommand: (() => void) | null = null;
@@ -67,6 +69,7 @@ function patchWebSocket() {
 
   if (!proto) {
     error("WebSocket.prototype.send not found.");
+    showToast("Fake Deafen: WebSocket not found");
     return;
   }
 
@@ -142,6 +145,7 @@ function tryRegisterCommand() {
 
   if (typeof registerCommand !== "function") {
     error("registerCommand not found. Slash command /fd will not be available.");
+    showToast("Fake Deafen: /fd command unavailable");
     return;
   }
 
@@ -155,9 +159,9 @@ function tryRegisterCommand() {
     execute: () => {
       const enabled = toggleEnabled();
 
-      return {
-        content: `Fake Deafen: ${enabled ? "ON" : "OFF"}`
-      };
+      showToast(`Fake Deafen: ${enabled ? "ON" : "OFF"}`);
+
+      return undefined as any;
     }
   });
 
