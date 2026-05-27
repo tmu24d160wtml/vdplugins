@@ -1,0 +1,14 @@
+{
+  "name": "UserVoiceShow Mobile",
+  "description": "Check which voice channel a user is in, inspired by Vencord UserVoiceShow.",
+  "authors": [
+    {
+      "name": "watermeloz",
+      "id": "394469439606882305"
+    }
+  ],
+  "main": "src/index.ts",
+  "vendetta": {
+    "icon": "ic_volume_up_24px"
+  }
+}
