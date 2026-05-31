@@ -2,88 +2,136 @@ import { showToast } from "@vendetta/ui/toasts";
 
 let originalSend: typeof WebSocket.prototype.send | null = null;
 let installed = false;
-let unregisterCommand: (() => void) | null = null;
+let unregisterFd: (() => void) | null = null;
+let unregisterFc: (() => void) | null = null;
 
-type FakeDeafenState = {
+// Định nghĩa trạng thái gộp cho cả Fake Deafen và Fast Camera
+type SharedPluginState = {
   installed: boolean;
-  enabled: boolean;
+  fdEnabled: boolean;
+  fcEnabled: boolean;
   originalSend: typeof WebSocket.prototype.send;
   activeWebSocket: WebSocket | null;
   lastVoiceState: any;
 };
 
+let fcInterval: NodeJS.Timeout | null = null;
+const TOGGLE_SPEED = 700; // Tốc độ chớp tắt camera (100ms)
+
 declare global {
-  var __fakeDeafenVendetta: FakeDeafenState | undefined;
+  var __sharedVoicePluginVendetta: SharedPluginState | undefined;
   var bunny: any;
   var vendetta: any;
 }
 
 function log(...args: unknown[]) {
-  console.log("[FakeDeafen]", ...args);
+  console.log("[VoiceCombo]", ...args);
 }
 
 function error(...args: unknown[]) {
-  console.error("[FakeDeafen]", ...args);
+  console.error("[VoiceCombo]", ...args);
 }
 
 function getWebSocketPrototype() {
   const WebSocketCtor = globalThis.WebSocket;
-
-  if (
-    !WebSocketCtor ||
-    !WebSocketCtor.prototype ||
-    typeof WebSocketCtor.prototype.send !== "function"
-  ) {
+  if (!WebSocketCtor || !WebSocketCtor.prototype || typeof WebSocketCtor.prototype.send !== "function") {
     return null;
   }
-
   return WebSocketCtor.prototype;
 }
 
-function getEnabled() {
-  return globalThis.__fakeDeafenVendetta?.enabled ?? false;
+// --- QUẢN LÝ TRẠNG THÁI (GETTER / SETTER) ---
+function getFdEnabled() { return globalThis.__sharedVoicePluginVendetta?.fdEnabled ?? false; }
+function setFdEnabled(value: boolean) {
+  const state = globalThis.__sharedVoicePluginVendetta;
+  if (state) state.fdEnabled = value;
 }
 
-function setEnabled(value: boolean) {
-  const state = globalThis.__fakeDeafenVendetta;
+function getFcEnabled() { return globalThis.__sharedVoicePluginVendetta?.fcEnabled ?? false; }
+function setFcEnabled(value: boolean) {
+  const state = globalThis.__sharedVoicePluginVendetta;
+  if (state) state.fcEnabled = value;
+}
 
-  if (state) {
-    state.enabled = value;
-    log(`Realtime toggle: ${value ? "ON" : "OFF"}`);
+// --- VÒNG LẶP CHO FAST CAMERA (GỬI GATEWAY CHỚP TẮT) ---
+let lastVideoState = false;
+function runFcLoop() {
+  const state = globalThis.__sharedVoicePluginVendetta;
+  if (!state || !state.fcEnabled || !state.activeWebSocket || !state.lastVoiceState) return;
+
+  try {
+    // Đảo trạng thái video liên tục
+    lastVideoState = !lastVideoState;
+    
+    // Sao chép trạng thái voice state mới nhất của phòng thoại hiện tại
+    const payload = {
+      op: 4,
+      d: {
+        ...state.lastVoiceState,
+        self_video: lastVideoState
+      }
+    };
+
+    // Gửi trực tiếp qua WebSocket đang hoạt động
+    state.originalSend.call(state.activeWebSocket, JSON.stringify(payload));
+  } catch (e) {
+    error("FC Loop failed to send payload:", e);
+  }
+
+  fcInterval = setTimeout(runFcLoop, TOGGLE_SPEED);
+}
+
+function startFc() {
+  setFcEnabled(true);
+  runFcLoop();
+}
+
+function stopFc() {
+  setFcEnabled(false);
+  if (fcInterval) {
+    clearTimeout(fcInterval);
+    fcInterval = null;
+  }
+  
+  // Trả camera về lại trạng thái bình thường (tắt hẳn) khi dừng lệnh
+  const state = globalThis.__sharedVoicePluginVendetta;
+  if (state && state.activeWebSocket && state.lastVoiceState) {
+    try {
+      const payload = {
+        op: 4,
+        d: { ...state.lastVoiceState, self_video: false }
+      };
+      state.originalSend.call(state.activeWebSocket, JSON.stringify(payload));
+    } catch(e) {}
   }
 }
 
-function toggleEnabled() {
-  const next = !getEnabled();
-  setEnabled(next);
-  return next;
-}
-
+// --- HOOK WEBSOCKET ---
 function patchWebSocket() {
-  if (installed || globalThis.__fakeDeafenVendetta?.installed) {
+  if (installed || globalThis.__sharedVoicePluginVendetta?.installed) {
     log("Already installed.");
     return;
   }
 
   const proto = getWebSocketPrototype();
-
   if (!proto) {
     error("WebSocket.prototype.send not found.");
-    showToast("Fake Deafen: WebSocket not found");
+    showToast("Voice Combo: WebSocket not found");
     return;
   }
 
   originalSend = proto.send;
 
-  const state: FakeDeafenState = {
+  const state: SharedPluginState = {
     installed: true,
-    enabled: true,
+    fdEnabled: true,  // Mặc định bật Fake Deafen khi load
+    fcEnabled: false, // Mặc định tắt Fast Camera khi load
     originalSend,
     activeWebSocket: null,
     lastVoiceState: null
   };
 
-  globalThis.__fakeDeafenVendetta = state;
+  globalThis.__sharedVoicePluginVendetta = state;
 
   proto.send = function patchedSend(
     this: WebSocket,
@@ -95,17 +143,16 @@ function patchWebSocket() {
 
         if (payload?.op === 4 && payload?.d) {
           state.activeWebSocket = this;
+          
+          // Lưu lại dữ liệu phòng thoại gốc (guild_id, channel_id...) để FC sử dụng cấu trúc này
           state.lastVoiceState = { ...payload.d };
 
-          if (state.enabled) {
+          // Xử lý logic Fake Deafen (/fd)
+          if (state.fdEnabled) {
             payload.d.self_deaf = true;
             payload.d.self_mute = true;
-
             data = JSON.stringify(payload);
-
             log("Forced voice state: self_deaf=true, self_mute=true");
-          } else {
-            log("Bypassed voice state because toggle is OFF.");
           }
         }
       }
@@ -117,12 +164,12 @@ function patchWebSocket() {
   };
 
   installed = true;
-  log("Started.");
+  log("Hooked WebSocket successful.");
 }
 
 function unpatchWebSocket() {
   const proto = getWebSocketPrototype();
-  const state = globalThis.__fakeDeafenVendetta;
+  const state = globalThis.__sharedVoicePluginVendetta;
 
   if (proto && state?.originalSend) {
     proto.send = state.originalSend;
@@ -130,60 +177,79 @@ function unpatchWebSocket() {
     proto.send = originalSend;
   }
 
-  delete globalThis.__fakeDeafenVendetta;
-
+  delete globalThis.__sharedVoicePluginVendetta;
   originalSend = null;
   installed = false;
-
-  log("Stopped and restored WebSocket.prototype.send.");
+  log("Restored WebSocket.");
 }
 
-function tryRegisterCommand() {
+// --- ĐĂNG KÝ CÁC LỆNH SLASH COMMANDS ---
+function registerCommands() {
   const registerCommand =
     globalThis.bunny?.api?.commands?.registerCommand ??
     globalThis.vendetta?.commands?.registerCommand;
 
   if (typeof registerCommand !== "function") {
-    error("registerCommand not found. Slash command /fd will not be available.");
-    showToast("Fake Deafen: /fd command unavailable");
+    error("registerCommand function not found.");
+    showToast("Voice Combo: Commands unavailable");
     return;
   }
 
-  unregisterCommand = registerCommand({
+  // Lệnh 1: /fd (Fake Deafen)
+  unregisterFd = registerCommand({
     name: "fd",
     displayName: "fd",
     description: "Toggle Fake Deafen ON/OFF",
     displayDescription: "Toggle Fake Deafen ON/OFF",
     options: [],
-
     execute: () => {
-      const enabled = toggleEnabled();
-
-      showToast(`Fake Deafen: ${enabled ? "ON" : "OFF"}`);
-
+      const nextState = !getFdEnabled();
+      setFdEnabled(nextState);
+      showToast(`Fake Deafen: ${nextState ? "ON" : "OFF"}`);
       return undefined as any;
     }
   });
 
-  log("Registered /fd command.");
+  // Lệnh 2: /fc (Fast Camera Spammer)
+  unregisterFc = registerCommand({
+    name: "fc",
+    displayName: "fc",
+    description: "Toggle Fast Camera Spammer ON/OFF",
+    displayDescription: "Toggle Fast Camera Spammer ON/OFF",
+    options: [],
+    execute: () => {
+      const isRunning = getFcEnabled();
+      if (isRunning) {
+        stopFc();
+        showToast("🟢 Fast Camera: OFF");
+      } else {
+        startFc();
+        showToast("⚡ Fast Camera: ON (100ms)");
+      }
+      return undefined as any;
+    }
+  });
+
+  log("Registered /fd and /fc commands.");
 }
 
-function unregisterFdCommand() {
-  if (typeof unregisterCommand === "function") {
-    unregisterCommand();
-  }
-
-  unregisterCommand = null;
+function unregisterCommands() {
+  if (typeof unregisterFd === "function") unregisterFd();
+  if (typeof unregisterFc === "function") unregisterFc();
+  unregisterFd = null;
+  unregisterFc = null;
 }
 
+// --- EXPORT DEFAULT PLUGIN ---
 export default {
   onLoad() {
     patchWebSocket();
-    tryRegisterCommand();
+    registerCommands();
   },
 
   onUnload() {
-    unregisterFdCommand();
+    stopFc();
+    unregisterCommands();
     unpatchWebSocket();
   }
 };
