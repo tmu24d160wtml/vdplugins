@@ -142,38 +142,39 @@ function collectMessages(value, output = [], depth = 0) {
 function scanCurrentChannelMessages() {
   try {
     const messageStore = findByStoreName("MessageStore");
-    const selectedStore = findByStoreName("SelectedChannelStore");
-    const channelId = selectedStore?.getChannelId?.() ?? selectedStore?.getCurrentlySelectedChannelId?.();
+    const selectedStore = findByStoreName("SelectedChannelStore") ?? findByProps("getChannelId", "getCurrentlySelectedChannelId") ?? findByProps("getChannelId");
+    const channelId = selectedStore?.getChannelId?.() ?? selectedStore?.getCurrentlySelectedChannelId?.() ?? selectedStore?.getLastSelectedChannelId?.();
     if (!messageStore || !channelId)
       return;
     const messages = messageStore.getMessages?.(channelId);
-    const loaded = collectMessages(messages);
-    loaded.forEach((message) => scheduleAutoTranslation(message));
-    if (!loaded.length)
-      collectMessages(messageStore).forEach((message) => scheduleAutoTranslation(message));
+    collectMessages(messages).forEach((message) => {
+      if (!message?.channel_id || message.channel_id === channelId)
+        scheduleAutoTranslation(message);
+    });
   } catch (error) {
     console.log("[Translate Messages] existing message scan failed", error);
   }
 }
 function subscribeToMessageEvents() {
   const dispatcher = FluxDispatcher;
-  if (messageEventSubscribed || typeof dispatcher?.subscribe !== "function")
-    return;
-  const subscribe = (event, handler) => {
-    const unsubscribe = dispatcher.subscribe(event, handler);
-    if (typeof unsubscribe === "function")
-      messageEventUnsubscribers.push(unsubscribe);
-  };
-  subscribe("MESSAGE_CREATE", (event) => scheduleAutoTranslation(event?.message ?? event));
-  subscribe("MESSAGE_UPDATE", (event) => scheduleAutoTranslation(event?.message ?? event));
-  subscribe("CHANNEL_SELECT", () => setTimeout(scanCurrentChannelMessages, 100));
-  subscribe("LOAD_MESSAGES_SUCCESS", () => setTimeout(scanCurrentChannelMessages, 100));
-  subscribe("LOAD_MESSAGES_SUCCESS", () => setTimeout(scanCurrentChannelMessages, 800));
-  messageEventSubscribed = true;
+  if (!messageEventSubscribed && typeof dispatcher?.subscribe === "function") {
+    const subscribe = (event, handler) => {
+      const unsubscribe = dispatcher.subscribe(event, handler);
+      if (typeof unsubscribe === "function")
+        messageEventUnsubscribers.push(unsubscribe);
+    };
+    subscribe("MESSAGE_CREATE", (event) => scheduleAutoTranslation(event?.message ?? event));
+    subscribe("MESSAGE_UPDATE", (event) => scheduleAutoTranslation(event?.message ?? event));
+    subscribe("CHANNEL_SELECT", () => setTimeout(scanCurrentChannelMessages, 100));
+    subscribe("LOAD_MESSAGES_SUCCESS", () => setTimeout(scanCurrentChannelMessages, 100));
+    subscribe("LOAD_MESSAGES_SUCCESS", () => setTimeout(scanCurrentChannelMessages, 800));
+    subscribe("MESSAGE_LIST_UPDATE", () => setTimeout(scanCurrentChannelMessages, 100));
+    messageEventSubscribed = true;
+  }
   setTimeout(scanCurrentChannelMessages, 500);
   setTimeout(scanCurrentChannelMessages, 2e3);
   setTimeout(scanCurrentChannelMessages, 5e3);
-  scanInterval = setInterval(scanCurrentChannelMessages, 3e3);
+  scanInterval ??= setInterval(scanCurrentChannelMessages, 2e3);
 }
 function patchMessageStore() {
   const store = findByProps("getMessages");
@@ -186,60 +187,6 @@ function patchMessageStore() {
   patchedModules.add(store);
   const unpatch = after("getMessages", store, (_args, result) => {
     collectMessages(result).forEach((message) => scheduleAutoTranslation(message));
-    return result;
-  });
-  runtimeUnpatches.add(unpatch);
-}
-function TranslatedLine({ message }) {
-  const [result, setResult] = React.useState(
-    translatedMessages.get(message?.id) ?? null
-  );
-  const text = getMessageText(message);
-  React.useEffect(() => {
-    if (!text?.trim() || !message?.id)
-      return;
-    let mounted = true;
-    const cached = translatedMessages.get(message.id);
-    const pending = translationPromises.get(message.id) ?? translate("incoming", text);
-    translationPromises.set(message.id, pending);
-    pending.then((value) => {
-      translatedMessages.set(message.id, value);
-      if (mounted)
-        setResult(value);
-    }).catch(() => void 0);
-    return () => {
-      mounted = false;
-    };
-  }, [message?.id, text]);
-  if (!result?.text || result.text.trim() === text.trim())
-    return null;
-  return React.createElement(RN.Text, {
-    style: { color: "#8a8f98", fontSize: 12, marginTop: 3, marginLeft: 2 }
-  }, result.text);
-}
-function patchMessageRenderer() {
-  const modules = [
-    findByName("MessageContent", false),
-    findByName("Message", false)
-  ].filter(Boolean);
-  const module = modules[0];
-  if (!module) {
-    setTimeout(patchMessageRenderer, 1500);
-    return;
-  }
-  if (patchedModules.has(module))
-    return;
-  patchedModules.add(module);
-  const unpatch = after("default", module, (args, result) => {
-    const message = args?.[0]?.message ?? args?.[0]?.props?.message;
-    if (!message || !result?.props)
-      return result;
-    const accessory = React.createElement(TranslatedLine, { message, key: `translation-${message.id}` });
-    const children = result.props.children;
-    if (Array.isArray(children))
-      result.props.children = [...children, accessory];
-    else
-      result.props.children = [children, accessory];
     return result;
   });
   runtimeUnpatches.add(unpatch);
@@ -390,7 +337,6 @@ var src_default = {
     registerSlashCommand();
     patchLazyMessageActionSheet();
     patchOutgoingMessages();
-    patchMessageRenderer();
     subscribeToMessageEvents();
     patchMessageStore();
   },
