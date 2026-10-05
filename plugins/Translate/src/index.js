@@ -26,6 +26,11 @@ var translationPromises = /* @__PURE__ */ new Map();
 var patchedModules = /* @__PURE__ */ new WeakSet();
 var autoProcessed = /* @__PURE__ */ new Set();
 var originalContents = /* @__PURE__ */ new Map();
+var redTranslation = (text) => `
+
+\`\`\`ansi
+\x1B[2;31m${text}\x1B[0m
+\`\`\``;
 var messageEventSubscribed = false;
 var languages = {
   auto: "Detect language",
@@ -110,9 +115,7 @@ function scheduleAutoTranslation(message) {
       return;
     translatedMessages.set(message.id, result);
     showToast(`Translation: ${result.text}`);
-    const updated = { ...message, content: `${original}
-
--# ${result.text}` };
+    const updated = { ...message, content: `${original}${redTranslation(result.text)}` };
     try {
       FluxDispatcher.dispatch({ type: "MESSAGE_UPDATE", message: updated, log_edit: false, otherPluginBypass: true });
     } catch {
@@ -195,7 +198,7 @@ function TranslatedLine({ message }) {
   if (!result?.text || result.text.trim() === text.trim())
     return null;
   return React.createElement(RN.Text, {
-    style: { color: "#8a8f98", fontSize: 12, marginTop: 3, marginLeft: 2 }
+    style: { color: "#ed4245", fontSize: 12, marginTop: 3, marginLeft: 2 }
   }, result.text);
 }
 function patchMessageRenderer() {
@@ -302,9 +305,7 @@ function patchLazyMessageActionSheet() {
                   id: message.id,
                   channel_id: message.channel_id,
                   guild_id: message.guild_id,
-                  content: `${content}
-
--# ${result.text}`
+                  content: `${content}${redTranslation(result.text)}`
                 },
                 log_edit: false,
                 otherPluginBypass: true
