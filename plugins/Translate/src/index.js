@@ -147,7 +147,10 @@ function scanCurrentChannelMessages() {
     if (!messageStore || !channelId)
       return;
     const messages = messageStore.getMessages?.(channelId);
-    collectMessages(messages).forEach((message) => scheduleAutoTranslation(message));
+    const loaded = collectMessages(messages);
+    loaded.forEach((message) => scheduleAutoTranslation(message));
+    if (!loaded.length)
+      collectMessages(messageStore).forEach((message) => scheduleAutoTranslation(message));
   } catch (error) {
     console.log("[Translate Messages] existing message scan failed", error);
   }
@@ -164,6 +167,8 @@ function subscribeToMessageEvents() {
   subscribe("MESSAGE_CREATE", (event) => scheduleAutoTranslation(event?.message ?? event));
   subscribe("MESSAGE_UPDATE", (event) => scheduleAutoTranslation(event?.message ?? event));
   subscribe("CHANNEL_SELECT", () => setTimeout(scanCurrentChannelMessages, 100));
+  subscribe("LOAD_MESSAGES_SUCCESS", () => setTimeout(scanCurrentChannelMessages, 100));
+  subscribe("LOAD_MESSAGES_SUCCESS", () => setTimeout(scanCurrentChannelMessages, 800));
   messageEventSubscribed = true;
   setTimeout(scanCurrentChannelMessages, 500);
   setTimeout(scanCurrentChannelMessages, 2e3);
@@ -307,7 +312,11 @@ function patchLazyMessageActionSheet() {
 }
 function patchOutgoingMessages() {
   const actions = findByProps("sendMessage");
-  if (!actions?.sendMessage)
+  if (!actions?.sendMessage) {
+    setTimeout(patchOutgoingMessages, 1500);
+    return;
+  }
+  if (sendUnpatch)
     return;
   sendUnpatch = instead("sendMessage", actions, async (args, original) => {
     if (!settings.autoTranslate || !args?.[1]?.content)
