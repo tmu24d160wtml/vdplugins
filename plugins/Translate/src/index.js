@@ -3,7 +3,7 @@ import { storage } from "@vendetta/plugin";
 import { showToast } from "@vendetta/ui/toasts";
 import { after, before, instead } from "@vendetta/patcher";
 import { registerCommand } from "@vendetta/commands";
-import { findByName, findByProps } from "@vendetta/metro";
+import { findByName, findByProps, findByStoreName } from "@vendetta/metro";
 import { React, ReactNative as RN, FluxDispatcher } from "@vendetta/metro/common";
 import { Forms } from "@vendetta/ui/components";
 import { findInReactTree } from "@vendetta/utils";
@@ -134,13 +134,28 @@ function collectMessages(value, output = [], depth = 0) {
   Object.values(value).forEach((item) => collectMessages(item, output, depth + 1));
   return output;
 }
+function scanCurrentChannelMessages() {
+  try {
+    const messageStore = findByStoreName("MessageStore");
+    const selectedStore = findByStoreName("SelectedChannelStore");
+    const channelId = selectedStore?.getChannelId?.() ?? selectedStore?.getCurrentlySelectedChannelId?.();
+    if (!messageStore || !channelId)
+      return;
+    const messages = messageStore.getMessages?.(channelId);
+    collectMessages(messages).forEach((message) => scheduleAutoTranslation(message));
+  } catch (error) {
+    console.log("[Translate Messages] existing message scan failed", error);
+  }
+}
 function subscribeToMessageEvents() {
   const dispatcher = FluxDispatcher;
   if (messageEventSubscribed || typeof dispatcher?.subscribe !== "function")
     return;
   dispatcher.subscribe("MESSAGE_CREATE", (event) => scheduleAutoTranslation(event?.message ?? event));
   dispatcher.subscribe("MESSAGE_UPDATE", (event) => scheduleAutoTranslation(event?.message ?? event));
+  dispatcher.subscribe("CHANNEL_SELECT", () => setTimeout(scanCurrentChannelMessages, 100));
   messageEventSubscribed = true;
+  setTimeout(scanCurrentChannelMessages, 500);
 }
 function patchMessageStore() {
   const store = findByProps("getMessages");
