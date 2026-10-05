@@ -1,12 +1,12 @@
+// plugins/Translate/src/index.ts
 import { storage } from "@vendetta/plugin";
-import { showToast } from "@vendetta/ui/toasts";
 import { after, before, instead } from "@vendetta/patcher";
 import { registerCommand } from "@vendetta/commands";
 import { findByName, findByProps, findByStoreName } from "@vendetta/metro";
 import { React, ReactNative as RN, FluxDispatcher } from "@vendetta/metro/common";
 import { Forms } from "@vendetta/ui/components";
 import { findInReactTree } from "@vendetta/utils";
-const defaults = {
+var defaults = {
   provider: "google",
   geminiApiKey: "",
   geminiModel: "gemini-2.0-flash",
@@ -16,17 +16,20 @@ const defaults = {
   outgoingTo: "en",
   autoTranslate: true
 };
-let settings = { ...defaults };
-let unregisterCommand;
-let messageMenuUnpatch;
-let sendUnpatch;
-const translatedMessages = /* @__PURE__ */ new Map();
-const translationPromises = /* @__PURE__ */ new Map();
-const patchedModules = /* @__PURE__ */ new WeakSet();
-const autoProcessed = /* @__PURE__ */ new Set();
-const originalContents = /* @__PURE__ */ new Map();
-let messageEventSubscribed = false;
-const languages = {
+var settings = { ...defaults };
+var unregisterCommand;
+var messageMenuUnpatch;
+var sendUnpatch;
+var translatedMessages = /* @__PURE__ */ new Map();
+var translationPromises = /* @__PURE__ */ new Map();
+var patchedModules = /* @__PURE__ */ new WeakSet();
+var patchedActionSheets = /* @__PURE__ */ new WeakSet();
+var autoProcessed = /* @__PURE__ */ new Set();
+var originalContents = /* @__PURE__ */ new Map();
+var messageEventSubscribed = false;
+var lazyActionSheetUnpatch;
+var sheetUnpatches = /* @__PURE__ */ new Set();
+var languages = {
   auto: "Detect language",
   en: "English",
   vi: "Vietnamese",
@@ -43,9 +46,6 @@ const languages = {
   it: "Italian",
   nl: "Dutch"
 };
-function getSetting(key) {
-  return settings[key];
-}
 function languageName(code) {
   return languages[code] ?? code;
 }
@@ -96,7 +96,7 @@ async function translate(direction, text) {
   return settings.provider === "gemini" ? geminiTranslate(text, from, to) : googleTranslate(text, from, to);
 }
 function notifyError(error) {
-  showToast(error instanceof Error ? error.message : "Translation failed");
+  console.error("[Translate Messages] translation failed", error);
 }
 function getMessageText(message) {
   return message?.content || message?.messageSnapshots?.[0]?.message?.content || "";
@@ -111,7 +111,6 @@ function scheduleAutoTranslation(message) {
     if (!result?.text || result.text.trim() === original.trim())
       return;
     translatedMessages.set(message.id, result);
-    showToast(`Translation: ${result.text}`);
     const updated = { ...message, content: `${original}
 
 -# ${result.text}` };
@@ -158,6 +157,8 @@ function subscribeToMessageEvents() {
   dispatcher.subscribe("CHANNEL_SELECT", () => setTimeout(scanCurrentChannelMessages, 100));
   messageEventSubscribed = true;
   setTimeout(scanCurrentChannelMessages, 500);
+  setTimeout(scanCurrentChannelMessages, 2e3);
+  setTimeout(scanCurrentChannelMessages, 5e3);
 }
 function patchMessageStore() {
   const store = findByProps("getMessages");
@@ -226,48 +227,6 @@ function patchMessageRenderer() {
     return result;
   });
 }
-function addTranslateAction(value, message) {
-  if (!value || typeof value !== "object")
-    return false;
-  const children = value.props?.children;
-  if (Array.isArray(children)) {
-    const already = children.some((child) => child?.props?.id === "translate-message");
-    if (!already && children.some((child) => child?.props?.id === "copy-text" || child?.props?.label === "Copy Text")) {
-      children.push({
-        type: "action",
-        props: {
-          id: "translate-message",
-          label: "Translate",
-          icon: "ic_language_24px",
-          onPress: async () => {
-            try {
-              const result = await translate("incoming", getMessageText(message));
-              translatedMessages.set(message.id, result);
-              showToast(`${result.text}\\n(${result.sourceLanguage} \u2192 ${languageName(settings.incomingTo)})`);
-            } catch (error) {
-              notifyError(error);
-            }
-          }
-        }
-      });
-      return true;
-    }
-    return children.some((child) => addTranslateAction(child, message));
-  }
-  return false;
-}
-function findMessageIn(value, depth = 0) {
-  if (!value || depth > 5 || typeof value !== "object")
-    return null;
-  if (typeof value.id === "string" && typeof value.content === "string")
-    return value;
-  for (const child of Object.values(value)) {
-    const found = findMessageIn(child, depth + 1);
-    if (found)
-      return found;
-  }
-  return null;
-}
 function patchLazyMessageActionSheet() {
   const lazy = findByProps("openLazy", "hideActionSheet");
   if (!lazy?.openLazy) {
@@ -277,12 +236,15 @@ function patchLazyMessageActionSheet() {
   if (patchedModules.has(lazy))
     return;
   patchedModules.add(lazy);
-  before("openLazy", lazy, ([component, key, props]) => {
+  lazyActionSheetUnpatch = before("openLazy", lazy, ([component, key, props]) => {
     const message = props?.message;
     if (key !== "MessageLongPressActionSheet" || !message || !component?.then)
       return;
     component.then((sheet) => {
-      after("default", sheet, (_args, tree) => {
+      if (!sheet || patchedActionSheets.has(sheet))
+        return;
+      patchedActionSheets.add(sheet);
+      const unpatchSheet = after("default", sheet, (_args, tree) => {
         const groups = findInReactTree(
           tree,
           (node) => Array.isArray(node) && node[0]?.type?.name === "ActionSheetRowGroup"
@@ -324,53 +286,8 @@ function patchLazyMessageActionSheet() {
           target.unshift(row);
         return tree;
       });
+      sheetUnpatches.add(unpatchSheet);
     }).catch(() => void 0);
-  });
-}
-function patchSimpleActionSheet() {
-  const module = findByProps("showSimpleActionSheet");
-  if (!module?.showSimpleActionSheet) {
-    setTimeout(patchSimpleActionSheet, 1500);
-    return;
-  }
-  if (patchedModules.has(module))
-    return;
-  patchedModules.add(module);
-  after("showSimpleActionSheet", module, (args) => {
-    const config = args?.[0];
-    const options = config?.options;
-    const message = findMessageIn(config);
-    if (!Array.isArray(options) || !message || options.some((item) => item?.id === "translate-message"))
-      return;
-    options.push({
-      id: "translate-message",
-      label: "Translate",
-      onPress: async () => {
-        try {
-          const result = await translate("incoming", getMessageText(message));
-          translatedMessages.set(message.id, result);
-          showToast(result.text);
-        } catch (error) {
-          notifyError(error);
-        }
-      }
-    });
-  });
-}
-function patchMessageLongPress() {
-  const module = findByName("MessageLongPressActionSheet", false);
-  if (!module) {
-    setTimeout(patchMessageLongPress, 1500);
-    return;
-  }
-  if (patchedModules.has(module))
-    return;
-  patchedModules.add(module);
-  messageMenuUnpatch = after("default", module, (_args, result) => {
-    const message = _args?.[0]?.message ?? _args?.[0]?.props?.message;
-    if (message)
-      addTranslateAction(result, message);
-    return result;
   });
 }
 function patchOutgoingMessages() {
@@ -400,7 +317,6 @@ function registerSlashCommand() {
     execute: () => {
       settings.autoTranslate = !settings.autoTranslate;
       storage.autoTranslate = settings.autoTranslate;
-      showToast(`Auto translate: ${settings.autoTranslate ? "ON" : "OFF"}`);
       return void 0;
     }
   });
@@ -444,14 +360,11 @@ function SettingsPanel() {
 var src_default = {
   onLoad() {
     console.log("[Translate Messages] loaded");
-    showToast("Translate Messages loaded");
     settings = { ...defaults, ...storage };
     settings.autoTranslate = true;
     storage.autoTranslate = true;
     registerSlashCommand();
     patchLazyMessageActionSheet();
-    patchSimpleActionSheet();
-    patchMessageLongPress();
     patchOutgoingMessages();
     patchMessageRenderer();
     subscribeToMessageEvents();
@@ -462,6 +375,10 @@ var src_default = {
     unregisterCommand = void 0;
     messageMenuUnpatch?.();
     sendUnpatch?.();
+    lazyActionSheetUnpatch?.();
+    lazyActionSheetUnpatch = void 0;
+    sheetUnpatches.forEach((unpatch) => unpatch());
+    sheetUnpatches.clear();
     translatedMessages.clear();
     translationPromises.clear();
     autoProcessed.clear();
