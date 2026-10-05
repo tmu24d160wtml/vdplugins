@@ -9,3 +9,4 @@ peerDependencyRules:
 onlyBuiltDependencies:
   - '@swc/core'
   - esbuild
+
