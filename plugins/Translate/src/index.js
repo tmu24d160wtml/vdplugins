@@ -343,6 +343,8 @@ function SettingsPanel() {
 var src_default = {
   onLoad() {
     settings = { ...defaults, ...storage };
+    settings.autoTranslate = true;
+    storage.autoTranslate = true;
     registerSlashCommand();
     patchSimpleActionSheet();
     patchMessageLongPress();
