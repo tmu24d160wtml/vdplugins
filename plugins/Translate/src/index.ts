@@ -1,6 +1,7 @@
 import { storage } from "@vendetta/plugin";
 import { showToast } from "@vendetta/ui/toasts";
-import { after, before, unpatchAll } from "@vendetta/patcher";
+import { after, instead } from "@vendetta/patcher";
+import { registerCommand } from "@vendetta/commands";
 import { findByName, findByProps } from "@vendetta/metro";
 
 /** Vendetta Translate Messages
@@ -160,9 +161,7 @@ function patchOutgoingMessages() {
 }
 
 function registerSlashCommand() {
-  const register = (globalThis as any).bunny?.api?.commands?.registerCommand
-    ?? (globalThis as any).vendetta?.commands?.registerCommand;
-  if (typeof register !== "function") return;
+  const register = registerCommand;
   unregisterCommand = register({
     name: "translate",
     displayName: "translate",
@@ -212,7 +211,7 @@ export default {
   onUnload() {
     unregisterCommand?.(); unregisterCommand = undefined;
     messageMenuUnpatch?.(); sendUnpatch?.();
-    unpatchAll(); translatedMessages.clear();
+    translatedMessages.clear();
   },
   getSettingsPanel: SettingsPanel,
 };
