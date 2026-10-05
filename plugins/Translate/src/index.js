@@ -28,9 +28,7 @@ var autoProcessed = /* @__PURE__ */ new Set();
 var originalContents = /* @__PURE__ */ new Map();
 var redTranslation = (text) => `
 
-\`\`\`diff
-- ${text}
-\`\`\``;
+-# ${text}`;
 var messageEventSubscribed = false;
 var languages = {
   auto: "Detect language",
@@ -198,7 +196,7 @@ function TranslatedLine({ message }) {
   if (!result?.text || result.text.trim() === text.trim())
     return null;
   return React.createElement(RN.Text, {
-    style: { color: "#ed4245", fontSize: 12, marginTop: 3, marginLeft: 2 }
+    style: { color: "#8a8f98", fontSize: 12, marginTop: 3, marginLeft: 2 }
   }, result.text);
 }
 function patchMessageRenderer() {
