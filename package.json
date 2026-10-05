@@ -17,10 +17,5 @@
 		"rollup-plugin-esbuild": "^5.0.0",
 		"vendetta-types": "latest",
 		"vendetta-extras": "latest"
-	},
-	"pnpm": {
-		"overrides": {
-			"acorn": "8.15.0"
-		}
 	}
 }
