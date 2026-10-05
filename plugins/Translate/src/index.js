@@ -1,10 +1,12 @@
 // plugins/Translate/src/index.ts
 import { storage } from "@vendetta/plugin";
 import { showToast } from "@vendetta/ui/toasts";
-import { after, instead } from "@vendetta/patcher";
+import { after, before, instead } from "@vendetta/patcher";
 import { registerCommand } from "@vendetta/commands";
 import { findByName, findByProps } from "@vendetta/metro";
 import { React, ReactNative as RN, FluxDispatcher } from "@vendetta/metro/common";
+import { Forms } from "@vendetta/ui/components";
+import { findInReactTree } from "@vendetta/utils";
 var defaults = {
   provider: "google",
   geminiApiKey: "",
@@ -24,6 +26,7 @@ var translationPromises = /* @__PURE__ */ new Map();
 var patchedModules = /* @__PURE__ */ new WeakSet();
 var autoProcessed = /* @__PURE__ */ new Set();
 var originalContents = /* @__PURE__ */ new Map();
+var messageEventSubscribed = false;
 var languages = {
   auto: "Detect language",
   en: "English",
@@ -106,11 +109,12 @@ function scheduleAutoTranslation(message) {
     if (!result?.text || result.text.trim() === original.trim())
       return;
     translatedMessages.set(message.id, result);
+    showToast(`Translation: ${result.text}`);
     const updated = { ...message, content: `${original}
 
 -# ${result.text}` };
     try {
-      FluxDispatcher.dispatch({ type: "MESSAGE_UPDATE", message: updated });
+      FluxDispatcher.dispatch({ type: "MESSAGE_UPDATE", message: updated, log_edit: false, otherPluginBypass: true });
     } catch {
       message.content = updated.content;
     }
@@ -129,6 +133,14 @@ function collectMessages(value, output = [], depth = 0) {
   }
   Object.values(value).forEach((item) => collectMessages(item, output, depth + 1));
   return output;
+}
+function subscribeToMessageEvents() {
+  const dispatcher = FluxDispatcher;
+  if (messageEventSubscribed || typeof dispatcher?.subscribe !== "function")
+    return;
+  dispatcher.subscribe("MESSAGE_CREATE", (event) => scheduleAutoTranslation(event?.message ?? event));
+  dispatcher.subscribe("MESSAGE_UPDATE", (event) => scheduleAutoTranslation(event?.message ?? event));
+  messageEventSubscribed = true;
 }
 function patchMessageStore() {
   const store = findByProps("getMessages");
@@ -238,6 +250,65 @@ function findMessageIn(value, depth = 0) {
       return found;
   }
   return null;
+}
+function patchLazyMessageActionSheet() {
+  const lazy = findByProps("openLazy", "hideActionSheet");
+  if (!lazy?.openLazy) {
+    setTimeout(patchLazyMessageActionSheet, 1500);
+    return;
+  }
+  if (patchedModules.has(lazy))
+    return;
+  patchedModules.add(lazy);
+  before("openLazy", lazy, ([component, key, props]) => {
+    const message = props?.message;
+    if (key !== "MessageLongPressActionSheet" || !message || !component?.then)
+      return;
+    component.then((sheet) => {
+      after("default", sheet, (_args, tree) => {
+        const groups = findInReactTree(
+          tree,
+          (node) => Array.isArray(node) && node[0]?.type?.name === "ActionSheetRowGroup"
+        );
+        const content = getMessageText(message);
+        if (!content || !groups)
+          return tree;
+        const Row = Forms.FormRow;
+        const row = React.createElement(Row, {
+          label: "Translate",
+          onPress: async () => {
+            lazy.hideActionSheet?.();
+            try {
+              const result = await translate("incoming", content);
+              translatedMessages.set(message.id, result);
+              FluxDispatcher.dispatch({
+                type: "MESSAGE_UPDATE",
+                message: {
+                  id: message.id,
+                  channel_id: message.channel_id,
+                  guild_id: message.guild_id,
+                  content: `${content}
+
+-# ${result.text}`
+                },
+                log_edit: false,
+                otherPluginBypass: true
+              });
+            } catch (error) {
+              notifyError(error);
+            }
+          }
+        });
+        const target = findInReactTree(
+          groups,
+          (node) => Array.isArray(node) && node.some((child) => child?.type?.name === "ActionSheetRow")
+        );
+        if (target)
+          target.unshift(row);
+        return tree;
+      });
+    }).catch(() => void 0);
+  });
 }
 function patchSimpleActionSheet() {
   const module = findByProps("showSimpleActionSheet");
@@ -356,14 +427,17 @@ function SettingsPanel() {
 var src_default = {
   onLoad() {
     console.log("[Translate Messages] loaded");
+    showToast("Translate Messages loaded");
     settings = { ...defaults, ...storage };
     settings.autoTranslate = true;
     storage.autoTranslate = true;
     registerSlashCommand();
+    patchLazyMessageActionSheet();
     patchSimpleActionSheet();
     patchMessageLongPress();
     patchOutgoingMessages();
     patchMessageRenderer();
+    subscribeToMessageEvents();
     patchMessageStore();
   },
   onUnload() {
@@ -375,6 +449,7 @@ var src_default = {
     translationPromises.clear();
     autoProcessed.clear();
     originalContents.clear();
+    messageEventSubscribed = false;
   },
   settings: SettingsPanel
 };
