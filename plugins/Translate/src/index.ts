@@ -44,6 +44,7 @@ let messageMenuUnpatch: (() => void) | undefined;
 let sendUnpatch: (() => void) | undefined;
 const translatedMessages = new Map<string, Translation>();
 const translationPromises = new Map<string, Promise<Translation>>();
+const patchedModules = new WeakSet<object>();
 
 const languages: Record<string, string> = {
   auto: "Detect language", en: "English", vi: "Vietnamese", zh: "Chinese", ja: "Japanese",
@@ -142,7 +143,12 @@ function patchMessageRenderer() {
     findByName("Message", false),
   ].filter(Boolean) as any[];
   const module = modules[0];
-  if (!module) return;
+  if (!module) {
+    setTimeout(patchMessageRenderer, 1500);
+    return;
+  }
+  if (patchedModules.has(module)) return;
+  patchedModules.add(module);
   after("default", module, (args: any[], result: any) => {
     const message = args?.[0]?.message ?? args?.[0]?.props?.message;
     if (!message || !result?.props) return result;
@@ -194,7 +200,12 @@ function findMessageIn(value: any, depth = 0): any {
 
 function patchSimpleActionSheet() {
   const module = findByProps("showSimpleActionSheet") as any;
-  if (!module?.showSimpleActionSheet) return;
+  if (!module?.showSimpleActionSheet) {
+    setTimeout(patchSimpleActionSheet, 1500);
+    return;
+  }
+  if (patchedModules.has(module)) return;
+  patchedModules.add(module);
   after("showSimpleActionSheet", module, (args: any[]) => {
     const config = args?.[0];
     const options = config?.options;
@@ -216,7 +227,12 @@ function patchSimpleActionSheet() {
 
 function patchMessageLongPress() {
   const module = findByName("MessageLongPressActionSheet", false) as any;
-  if (!module) return;
+  if (!module) {
+    setTimeout(patchMessageLongPress, 1500);
+    return;
+  }
+  if (patchedModules.has(module)) return;
+  patchedModules.add(module);
   messageMenuUnpatch = after("default", module, (_args: any[], result: any) => {
     const message = _args?.[0]?.message ?? _args?.[0]?.props?.message;
     if (message) addTranslateAction(result, message);
@@ -296,4 +312,5 @@ export default {
   },
   settings: SettingsPanel,
 };
+
 

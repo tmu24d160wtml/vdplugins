@@ -21,6 +21,7 @@ var messageMenuUnpatch;
 var sendUnpatch;
 var translatedMessages = /* @__PURE__ */ new Map();
 var translationPromises = /* @__PURE__ */ new Map();
+var patchedModules = /* @__PURE__ */ new WeakSet();
 var languages = {
   auto: "Detect language",
   en: "English",
@@ -126,8 +127,13 @@ function patchMessageRenderer() {
     findByName("Message", false)
   ].filter(Boolean);
   const module = modules[0];
-  if (!module)
+  if (!module) {
+    setTimeout(patchMessageRenderer, 1500);
     return;
+  }
+  if (patchedModules.has(module))
+    return;
+  patchedModules.add(module);
   after("default", module, (args, result) => {
     const message = args?.[0]?.message ?? args?.[0]?.props?.message;
     if (!message || !result?.props)
@@ -185,8 +191,13 @@ function findMessageIn(value, depth = 0) {
 }
 function patchSimpleActionSheet() {
   const module = findByProps("showSimpleActionSheet");
-  if (!module?.showSimpleActionSheet)
+  if (!module?.showSimpleActionSheet) {
+    setTimeout(patchSimpleActionSheet, 1500);
     return;
+  }
+  if (patchedModules.has(module))
+    return;
+  patchedModules.add(module);
   after("showSimpleActionSheet", module, (args) => {
     const config = args?.[0];
     const options = config?.options;
@@ -210,8 +221,13 @@ function patchSimpleActionSheet() {
 }
 function patchMessageLongPress() {
   const module = findByName("MessageLongPressActionSheet", false);
-  if (!module)
+  if (!module) {
+    setTimeout(patchMessageLongPress, 1500);
     return;
+  }
+  if (patchedModules.has(module))
+    return;
+  patchedModules.add(module);
   messageMenuUnpatch = after("default", module, (_args, result) => {
     const message = _args?.[0]?.message ?? _args?.[0]?.props?.message;
     if (message)
