@@ -34,7 +34,7 @@ const defaults: Settings = {
   incomingTo: "vi",
   outgoingFrom: "auto",
   outgoingTo: "en",
-  autoTranslate: false,
+  autoTranslate: true,
 };
 
 

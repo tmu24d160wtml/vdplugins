@@ -13,7 +13,7 @@ var defaults = {
   incomingTo: "vi",
   outgoingFrom: "auto",
   outgoingTo: "en",
-  autoTranslate: false
+  autoTranslate: true
 };
 var settings = { ...defaults };
 var unregisterCommand;
