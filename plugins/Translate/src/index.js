@@ -26,6 +26,8 @@ var patchedModules = /* @__PURE__ */ new WeakSet();
 var autoProcessed = /* @__PURE__ */ new Set();
 var originalContents = /* @__PURE__ */ new Map();
 var messageEventSubscribed = false;
+var messageEventUnsubscribers = [];
+var runtimeUnpatches = /* @__PURE__ */ new Set();
 var lazyActionSheetUnpatch;
 var sheetUnpatches = /* @__PURE__ */ new Set();
 var languages = {
@@ -151,9 +153,14 @@ function subscribeToMessageEvents() {
   const dispatcher = FluxDispatcher;
   if (messageEventSubscribed || typeof dispatcher?.subscribe !== "function")
     return;
-  dispatcher.subscribe("MESSAGE_CREATE", (event) => scheduleAutoTranslation(event?.message ?? event));
-  dispatcher.subscribe("MESSAGE_UPDATE", (event) => scheduleAutoTranslation(event?.message ?? event));
-  dispatcher.subscribe("CHANNEL_SELECT", () => setTimeout(scanCurrentChannelMessages, 100));
+  const subscribe = (event, handler) => {
+    const unsubscribe = dispatcher.subscribe(event, handler);
+    if (typeof unsubscribe === "function")
+      messageEventUnsubscribers.push(unsubscribe);
+  };
+  subscribe("MESSAGE_CREATE", (event) => scheduleAutoTranslation(event?.message ?? event));
+  subscribe("MESSAGE_UPDATE", (event) => scheduleAutoTranslation(event?.message ?? event));
+  subscribe("CHANNEL_SELECT", () => setTimeout(scanCurrentChannelMessages, 100));
   messageEventSubscribed = true;
   setTimeout(scanCurrentChannelMessages, 500);
   setTimeout(scanCurrentChannelMessages, 2e3);
@@ -168,10 +175,11 @@ function patchMessageStore() {
   if (patchedModules.has(store))
     return;
   patchedModules.add(store);
-  after("getMessages", store, (_args, result) => {
+  const unpatch = after("getMessages", store, (_args, result) => {
     collectMessages(result).forEach((message) => scheduleAutoTranslation(message));
     return result;
   });
+  runtimeUnpatches.add(unpatch);
 }
 function TranslatedLine({ message }) {
   const [result, setResult] = React.useState(
@@ -213,7 +221,7 @@ function patchMessageRenderer() {
   if (patchedModules.has(module))
     return;
   patchedModules.add(module);
-  after("default", module, (args, result) => {
+  const unpatch = after("default", module, (args, result) => {
     const message = args?.[0]?.message ?? args?.[0]?.props?.message;
     if (!message || !result?.props)
       return result;
@@ -225,6 +233,7 @@ function patchMessageRenderer() {
       result.props.children = [children, accessory];
     return result;
   });
+  runtimeUnpatches.add(unpatch);
 }
 function patchLazyMessageActionSheet() {
   const lazy = findByProps("openLazy", "hideActionSheet");
@@ -385,6 +394,9 @@ var src_default = {
     translationPromises.clear();
     autoProcessed.clear();
     originalContents.clear();
+    messageEventUnsubscribers.splice(0).forEach((unsubscribe) => unsubscribe());
+    runtimeUnpatches.forEach((unpatch) => unpatch());
+    runtimeUnpatches.clear();
     messageEventSubscribed = false;
   },
   settings: SettingsPanel
