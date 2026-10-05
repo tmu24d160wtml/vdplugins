@@ -116,8 +116,22 @@ function scheduleAutoTranslation(message) {
     }
   }).catch(() => autoProcessed.delete(message.id));
 }
+function collectMessages(value, output = [], depth = 0) {
+  if (!value || depth > 4 || typeof value !== "object")
+    return output;
+  if (typeof value.id === "string" && typeof value.content === "string") {
+    output.push(value);
+    return output;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectMessages(item, output, depth + 1));
+    return output;
+  }
+  Object.values(value).forEach((item) => collectMessages(item, output, depth + 1));
+  return output;
+}
 function patchMessageStore() {
-  const store = findByProps("getMessages", "getMessage");
+  const store = findByProps("getMessages");
   if (!store?.getMessages) {
     setTimeout(patchMessageStore, 1500);
     return;
@@ -126,8 +140,7 @@ function patchMessageStore() {
     return;
   patchedModules.add(store);
   after("getMessages", store, (_args, result) => {
-    const values = Array.isArray(result) ? result : Object.values(result ?? {});
-    values.forEach((message) => scheduleAutoTranslation(message));
+    collectMessages(result).forEach((message) => scheduleAutoTranslation(message));
     return result;
   });
 }
@@ -342,6 +355,7 @@ function SettingsPanel() {
 }
 var src_default = {
   onLoad() {
+    console.log("[Translate Messages] loaded");
     settings = { ...defaults, ...storage };
     settings.autoTranslate = true;
     storage.autoTranslate = true;
