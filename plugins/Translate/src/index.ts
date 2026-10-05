@@ -179,8 +179,9 @@ function registerSlashCommand() {
 }
 
 function SettingsPanel() {
-  const React = (globalThis as any).React;
-  const RN = (globalThis as any).ReactNative;
+  const React = (globalThis as any).React ?? (findByProps("createElement", "useState") as any);
+  const RN = (findByProps("AppRegistry", "TextInput", "ScrollView") as any)
+    ?? (globalThis as any).ReactNative;
   if (!React || !RN) return null;
   const [value, setValue] = React.useState({ ...settings });
   const update = (key: keyof Settings, next: any) => {
