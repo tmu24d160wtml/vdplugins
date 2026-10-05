@@ -26,6 +26,7 @@ var patchedModules = /* @__PURE__ */ new WeakSet();
 var autoProcessed = /* @__PURE__ */ new Set();
 var originalContents = /* @__PURE__ */ new Map();
 var messageEventSubscribed = false;
+var scanInterval;
 var messageEventUnsubscribers = [];
 var runtimeUnpatches = /* @__PURE__ */ new Set();
 var lazyActionSheetUnpatch;
@@ -100,7 +101,9 @@ function notifyError(error) {
   console.error("[Translate Messages] translation failed", error);
 }
 function getMessageText(message) {
-  return message?.content || message?.messageSnapshots?.[0]?.message?.content || "";
+  const content = message?.content || message?.messageSnapshots?.[0]?.message?.content || "";
+  const marker = content.indexOf("\n\n-# ");
+  return marker >= 0 ? content.slice(0, marker) : content;
 }
 function scheduleAutoTranslation(message) {
   if (!settings.autoTranslate || !message?.id || !getMessageText(message)?.trim() || autoProcessed.has(message.id))
@@ -165,6 +168,7 @@ function subscribeToMessageEvents() {
   setTimeout(scanCurrentChannelMessages, 500);
   setTimeout(scanCurrentChannelMessages, 2e3);
   setTimeout(scanCurrentChannelMessages, 5e3);
+  scanInterval = setInterval(scanCurrentChannelMessages, 3e3);
 }
 function patchMessageStore() {
   const store = findByProps("getMessages");
@@ -395,6 +399,9 @@ var src_default = {
     autoProcessed.clear();
     originalContents.clear();
     messageEventUnsubscribers.splice(0).forEach((unsubscribe) => unsubscribe());
+    if (scanInterval)
+      clearInterval(scanInterval);
+    scanInterval = void 0;
     runtimeUnpatches.forEach((unpatch) => unpatch());
     runtimeUnpatches.clear();
     messageEventSubscribed = false;
