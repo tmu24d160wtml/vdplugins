@@ -1,1 +1,1 @@
-{"name":"Translate Messages","description":"Translate outgoing and incoming Discord messages with Google Translate or Gemini.","authors":[{"name":"Custom"}],"main":"index.js","vendetta":{"icon":"ic_language_24px"},"hash":"c886c3b5c6157c342c37970dcde8c6a6a7e54cc380a82bf8b737b9ad3ecbfab5"}
+{"name":"Translate Messages","description":"Translate outgoing and incoming Discord messages with Google Translate or Gemini.","authors":[{"name":"Custom"}],"main":"index.js","vendetta":{"icon":"ic_language_24px"},"hash":"bc9b95e8d96449a28a7b0cc9b51e255f291582fbc021c6d021683d77a16b32e5"}
