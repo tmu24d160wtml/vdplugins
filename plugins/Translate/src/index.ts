@@ -43,6 +43,7 @@ let unregisterCommand: (() => void) | undefined;
 let messageMenuUnpatch: (() => void) | undefined;
 let sendUnpatch: (() => void) | undefined;
 const translatedMessages = new Map<string, Translation>();
+const translationPromises = new Map<string, Promise<Translation>>();
 
 const languages: Record<string, string> = {
   auto: "Detect language", en: "English", vi: "Vietnamese", zh: "Chinese", ja: "Japanese",
@@ -108,6 +109,49 @@ function notifyError(error: unknown) {
 
 function getMessageText(message: any): string {
   return message?.content || message?.messageSnapshots?.[0]?.message?.content || "";
+}
+
+function TranslatedLine({ message }: { message: any }) {
+  const [result, setResult] = React.useState<Translation | null>(
+    translatedMessages.get(message?.id) ?? null
+  );
+  const text = getMessageText(message);
+
+  React.useEffect(() => {
+    if (!text?.trim() || !message?.id) return;
+    let mounted = true;
+    const cached = translatedMessages.get(message.id);
+    const pending = translationPromises.get(message.id) ?? translate("incoming", text);
+    translationPromises.set(message.id, pending);
+    pending.then(value => {
+      translatedMessages.set(message.id, value);
+      if (mounted) setResult(value);
+    }).catch(() => undefined);
+    return () => { mounted = false; };
+  }, [message?.id, text]);
+
+  if (!result?.text || result.text.trim() === text.trim()) return null;
+  return React.createElement(RN.Text, {
+    style: { color: "#8a8f98", fontSize: 12, marginTop: 3, marginLeft: 2 },
+  }, result.text);
+}
+
+function patchMessageRenderer() {
+  const modules = [
+    findByName("MessageContent", false),
+    findByName("Message", false),
+  ].filter(Boolean) as any[];
+  const module = modules[0];
+  if (!module) return;
+  after("default", module, (args: any[], result: any) => {
+    const message = args?.[0]?.message ?? args?.[0]?.props?.message;
+    if (!message || !result?.props) return result;
+    const accessory = React.createElement(TranslatedLine, { message, key: `translation-${message.id}` });
+    const children = result.props.children;
+    if (Array.isArray(children)) result.props.children = [...children, accessory];
+    else result.props.children = [children, accessory];
+    return result;
+  });
 }
 
 function addTranslateAction(value: any, message: any): boolean {
@@ -181,13 +225,16 @@ function registerSlashCommand() {
 function SettingsPanel() {
 
   const [value, setValue] = React.useState({ ...settings });
+  const isDark = RN.useColorScheme?.() === "dark";
+  const inputTextColor = isDark ? "#ffffff" : "#202124";
   const update = (key: keyof Settings, next: any) => {
     const merged = { ...value, [key]: next };
     setValue(merged); settings = merged; storage[key as any] = next;
   };
   const input = (key: keyof Settings, label: string, placeholder = "") => React.createElement(RN.TextInput, {
-    value: String(value[key] ?? ""), placeholder, onChangeText: (v: string) => update(key, v),
-    style: { color: "white", borderBottomWidth: 1, borderBottomColor: "#555", padding: 10, marginBottom: 10 },
+    value: String(value[key] ?? ""), placeholder, placeholderTextColor: isDark ? "#9aa0a6" : "#8a8a8a",
+    onChangeText: (v: string) => update(key, v),
+    style: { color: inputTextColor, borderBottomWidth: 1, borderBottomColor: isDark ? "#777" : "#555", padding: 10, marginBottom: 10 },
   });
   return React.createElement(RN.ScrollView, { style: { padding: 16 } },
     React.createElement(RN.Text, { style: { color: "white", fontSize: 18, fontWeight: "bold", marginBottom: 12 } }, "Translate Messages"),
@@ -205,11 +252,13 @@ export default {
     registerSlashCommand();
     patchMessageLongPress();
     patchOutgoingMessages();
+    patchMessageRenderer();
   },
   onUnload() {
     unregisterCommand?.(); unregisterCommand = undefined;
     messageMenuUnpatch?.(); sendUnpatch?.();
     translatedMessages.clear();
+    translationPromises.clear();
   },
   settings: SettingsPanel,
 };
