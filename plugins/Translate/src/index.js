@@ -23,7 +23,6 @@ var sendUnpatch;
 var translatedMessages = /* @__PURE__ */ new Map();
 var translationPromises = /* @__PURE__ */ new Map();
 var patchedModules = /* @__PURE__ */ new WeakSet();
-var patchedActionSheets = /* @__PURE__ */ new WeakSet();
 var autoProcessed = /* @__PURE__ */ new Set();
 var originalContents = /* @__PURE__ */ new Map();
 var messageEventSubscribed = false;
@@ -241,10 +240,13 @@ function patchLazyMessageActionSheet() {
     if (key !== "MessageLongPressActionSheet" || !message || !component?.then)
       return;
     component.then((sheet) => {
-      if (!sheet || patchedActionSheets.has(sheet))
+      if (!sheet)
         return;
-      patchedActionSheets.add(sheet);
       const unpatchSheet = after("default", sheet, (_args, tree) => {
+        React.useEffect(() => () => {
+          unpatchSheet();
+          sheetUnpatches.delete(unpatchSheet);
+        }, []);
         const groups = findInReactTree(
           tree,
           (node) => Array.isArray(node) && node[0]?.type?.name === "ActionSheetRowGroup"
