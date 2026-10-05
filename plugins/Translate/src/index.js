@@ -28,8 +28,8 @@ var autoProcessed = /* @__PURE__ */ new Set();
 var originalContents = /* @__PURE__ */ new Map();
 var redTranslation = (text) => `
 
-\`\`\`ansi
-\x1B[2;31m${text}\x1B[0m
+\`\`\`diff
+- ${text}
 \`\`\``;
 var messageEventSubscribed = false;
 var languages = {
