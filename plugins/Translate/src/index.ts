@@ -211,6 +211,6 @@ export default {
     messageMenuUnpatch?.(); sendUnpatch?.();
     translatedMessages.clear();
   },
-  getSettingsPanel: SettingsPanel,
+  settings: SettingsPanel,
 };
 
