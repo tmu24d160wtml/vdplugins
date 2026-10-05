@@ -1,4 +1,3 @@
-// plugins/Translate/src/index.ts
 import { storage } from "@vendetta/plugin";
 import { showToast } from "@vendetta/ui/toasts";
 import { after, before, instead } from "@vendetta/patcher";
@@ -7,7 +6,7 @@ import { findByName, findByProps, findByStoreName } from "@vendetta/metro";
 import { React, ReactNative as RN, FluxDispatcher } from "@vendetta/metro/common";
 import { Forms } from "@vendetta/ui/components";
 import { findInReactTree } from "@vendetta/utils";
-var defaults = {
+const defaults = {
   provider: "google",
   geminiApiKey: "",
   geminiModel: "gemini-2.0-flash",
@@ -17,20 +16,17 @@ var defaults = {
   outgoingTo: "en",
   autoTranslate: true
 };
-var settings = { ...defaults };
-var unregisterCommand;
-var messageMenuUnpatch;
-var sendUnpatch;
-var translatedMessages = /* @__PURE__ */ new Map();
-var translationPromises = /* @__PURE__ */ new Map();
-var patchedModules = /* @__PURE__ */ new WeakSet();
-var autoProcessed = /* @__PURE__ */ new Set();
-var originalContents = /* @__PURE__ */ new Map();
-var redTranslation = (text) => `
-
--# ${text}`;
-var messageEventSubscribed = false;
-var languages = {
+let settings = { ...defaults };
+let unregisterCommand;
+let messageMenuUnpatch;
+let sendUnpatch;
+const translatedMessages = /* @__PURE__ */ new Map();
+const translationPromises = /* @__PURE__ */ new Map();
+const patchedModules = /* @__PURE__ */ new WeakSet();
+const autoProcessed = /* @__PURE__ */ new Set();
+const originalContents = /* @__PURE__ */ new Map();
+let messageEventSubscribed = false;
+const languages = {
   auto: "Detect language",
   en: "English",
   vi: "Vietnamese",
@@ -47,6 +43,9 @@ var languages = {
   it: "Italian",
   nl: "Dutch"
 };
+function getSetting(key) {
+  return settings[key];
+}
 function languageName(code) {
   return languages[code] ?? code;
 }
@@ -113,7 +112,9 @@ function scheduleAutoTranslation(message) {
       return;
     translatedMessages.set(message.id, result);
     showToast(`Translation: ${result.text}`);
-    const updated = { ...message, content: `${original}${redTranslation(result.text)}` };
+    const updated = { ...message, content: `${original}
+
+-# ${result.text}` };
     try {
       FluxDispatcher.dispatch({ type: "MESSAGE_UPDATE", message: updated, log_edit: false, otherPluginBypass: true });
     } catch {
@@ -303,7 +304,9 @@ function patchLazyMessageActionSheet() {
                   id: message.id,
                   channel_id: message.channel_id,
                   guild_id: message.guild_id,
-                  content: `${content}${redTranslation(result.text)}`
+                  content: `${content}
+
+-# ${result.text}`
                 },
                 log_edit: false,
                 otherPluginBypass: true
