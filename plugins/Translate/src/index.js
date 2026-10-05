@@ -4,7 +4,7 @@ import { showToast } from "@vendetta/ui/toasts";
 import { after, instead } from "@vendetta/patcher";
 import { registerCommand } from "@vendetta/commands";
 import { findByName, findByProps } from "@vendetta/metro";
-import { React, ReactNative as RN } from "@vendetta/metro/common";
+import { React, ReactNative as RN, FluxDispatcher } from "@vendetta/metro/common";
 var defaults = {
   provider: "google",
   geminiApiKey: "",
@@ -22,6 +22,8 @@ var sendUnpatch;
 var translatedMessages = /* @__PURE__ */ new Map();
 var translationPromises = /* @__PURE__ */ new Map();
 var patchedModules = /* @__PURE__ */ new WeakSet();
+var autoProcessed = /* @__PURE__ */ new Set();
+var originalContents = /* @__PURE__ */ new Map();
 var languages = {
   auto: "Detect language",
   en: "English",
@@ -93,6 +95,41 @@ function notifyError(error) {
 }
 function getMessageText(message) {
   return message?.content || message?.messageSnapshots?.[0]?.message?.content || "";
+}
+function scheduleAutoTranslation(message) {
+  if (!settings.autoTranslate || !message?.id || !getMessageText(message)?.trim() || autoProcessed.has(message.id))
+    return;
+  autoProcessed.add(message.id);
+  const original = getMessageText(message);
+  originalContents.set(message.id, original);
+  translate("incoming", original).then((result) => {
+    if (!result?.text || result.text.trim() === original.trim())
+      return;
+    translatedMessages.set(message.id, result);
+    const updated = { ...message, content: `${original}
+
+-# ${result.text}` };
+    try {
+      FluxDispatcher.dispatch({ type: "MESSAGE_UPDATE", message: updated });
+    } catch {
+      message.content = updated.content;
+    }
+  }).catch(() => autoProcessed.delete(message.id));
+}
+function patchMessageStore() {
+  const store = findByProps("getMessages", "getMessage");
+  if (!store?.getMessages) {
+    setTimeout(patchMessageStore, 1500);
+    return;
+  }
+  if (patchedModules.has(store))
+    return;
+  patchedModules.add(store);
+  after("getMessages", store, (_args, result) => {
+    const values = Array.isArray(result) ? result : Object.values(result ?? {});
+    values.forEach((message) => scheduleAutoTranslation(message));
+    return result;
+  });
 }
 function TranslatedLine({ message }) {
   const [result, setResult] = React.useState(
@@ -311,6 +348,7 @@ var src_default = {
     patchMessageLongPress();
     patchOutgoingMessages();
     patchMessageRenderer();
+    patchMessageStore();
   },
   onUnload() {
     unregisterCommand?.();
@@ -319,6 +357,8 @@ var src_default = {
     sendUnpatch?.();
     translatedMessages.clear();
     translationPromises.clear();
+    autoProcessed.clear();
+    originalContents.clear();
   },
   settings: SettingsPanel
 };
