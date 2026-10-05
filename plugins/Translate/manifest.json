@@ -1,0 +1,7 @@
+{
+  "name": "Translate Messages",
+  "description": "Translate outgoing and incoming Discord messages with Google Translate or Gemini.",
+  "authors": [{ "name": "Custom" }],
+  "main": "src/index.ts",
+  "vendetta": { "icon": "ic_language_24px" }
+}
