@@ -1,6 +1,6 @@
 // plugins/Translate/src/index.ts
 import { storage } from "@vendetta/plugin";
-import { after, before } from "@vendetta/patcher";
+import { after, before, instead } from "@vendetta/patcher";
 import { findByProps } from "@vendetta/metro";
 import { React, ReactNative as RN, FluxDispatcher } from "@vendetta/metro/common";
 import { Forms } from "@vendetta/ui/components";
@@ -10,12 +10,15 @@ var defaults = {
   geminiApiKey: "",
   geminiModel: "gemini-2.0-flash",
   incomingFrom: "auto",
-  incomingTo: "vi"
+  incomingTo: "vi",
+  outgoingFrom: "auto",
+  outgoingTo: "en"
 };
 var settings = { ...defaults };
 var translatedMessages = /* @__PURE__ */ new Map();
 var patchedModules = /* @__PURE__ */ new WeakSet();
 var lazyActionSheetUnpatch;
+var sendUnpatch;
 var sheetUnpatches = /* @__PURE__ */ new Set();
 var languages = {
   auto: "Detect language",
@@ -76,12 +79,33 @@ ${text}`;
     throw new Error("Gemini returned an empty translation");
   return { text: translated, sourceLanguage: from === "auto" ? "detected language" : from };
 }
-async function translate(text) {
-  const from = settings.incomingFrom;
-  const to = settings.incomingTo;
+async function translate(text, direction = "incoming") {
+  const from = direction === "incoming" ? settings.incomingFrom : settings.outgoingFrom;
+  const to = direction === "incoming" ? settings.incomingTo : settings.outgoingTo;
   if (!text.trim())
     return { text, sourceLanguage: from };
   return settings.provider === "gemini" ? geminiTranslate(text, from, to) : googleTranslate(text, from, to);
+}
+function patchOutgoingMessages() {
+  const actions = findByProps("sendMessage");
+  if (!actions?.sendMessage) {
+    setTimeout(patchOutgoingMessages, 1500);
+    return;
+  }
+  if (sendUnpatch)
+    return;
+  sendUnpatch = instead("sendMessage", actions, async (args, original) => {
+    const content = args?.[1]?.content;
+    if (typeof content !== "string" || !content.trim())
+      return original(...args);
+    try {
+      const result = await translate(content, "outgoing");
+      args[1] = { ...args[1], content: result.text };
+    } catch (error) {
+      notifyError(error);
+    }
+    return original(...args);
+  });
 }
 function notifyError(error) {
   console.error("[Translate Messages] translation failed", error);
@@ -186,7 +210,10 @@ function SettingsPanel() {
     input("geminiModel", "gemini-2.0-flash"),
     React.createElement(RN.Text, { style: { color: isDark ? "#bbb" : "#555" } }, "Incoming message: source language and target language"),
     input("incomingFrom", "auto"),
-    input("incomingTo", "vi")
+    input("incomingTo", "vi"),
+    React.createElement(RN.Text, { style: { color: isDark ? "#bbb" : "#555", marginTop: 12 } }, "Your messages: source language and target language"),
+    input("outgoingFrom", "auto"),
+    input("outgoingTo", "en")
   );
 }
 var src_default = {
@@ -194,10 +221,13 @@ var src_default = {
     console.log("[Translate Messages] loaded");
     settings = { ...defaults, ...storage };
     patchLazyMessageActionSheet();
+    patchOutgoingMessages();
   },
   onUnload() {
     lazyActionSheetUnpatch?.();
     lazyActionSheetUnpatch = void 0;
+    sendUnpatch?.();
+    sendUnpatch = void 0;
     sheetUnpatches.forEach((unpatch) => unpatch());
     sheetUnpatches.clear();
     translatedMessages.clear();
